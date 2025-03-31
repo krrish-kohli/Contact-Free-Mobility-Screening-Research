@@ -329,47 +329,43 @@ class RadarGUI:
         self.create_plots()
 
     def create_plots(self):
-        """Create the matplotlib plots"""
+        """Create the matplotlib plots for time series data"""
         # Create figure with subplots
         self.fig = plt.Figure(figsize=(12, 8), dpi=100)
 
-        # Create subplots
-        gs = self.fig.add_gridspec(2, 3)
+        # Create three subplots for distance, velocity, and angle
+        gs = self.fig.add_gridspec(3, 1, height_ratios=[1, 1, 1])
 
-        # Distance profile
-        self.ax_dist = self.fig.add_subplot(gs[0, 0])
-        self.ax_dist.set_title("Distance Profile")
-        self.ax_dist.set_xlabel("Distance (m)")
-        self.ax_dist.set_ylabel("Magnitude (dB)")
+        # Distance vs time plot
+        self.ax_dist = self.fig.add_subplot(gs[0])
+        self.ax_dist.set_title("Distance vs Time")
+        self.ax_dist.set_xlabel("Time (s)")
+        self.ax_dist.set_ylabel("Distance (m)")
         self.ax_dist.grid(True)
 
-        # Velocity profile
-        self.ax_vel = self.fig.add_subplot(gs[0, 1])
-        self.ax_vel.set_title("Velocity Profile")
-        self.ax_vel.set_xlabel("Velocity (m/s)")
-        self.ax_vel.set_ylabel("Magnitude (dB)")
+        # Velocity vs time plot
+        self.ax_vel = self.fig.add_subplot(gs[1])
+        self.ax_vel.set_title("Velocity vs Time")
+        self.ax_vel.set_xlabel("Time (s)")
+        self.ax_vel.set_ylabel("Velocity (m/s)")
         self.ax_vel.grid(True)
 
-        # Angle profile
-        self.ax_angle = self.fig.add_subplot(gs[0, 2])
-        self.ax_angle.set_title("Angle Profile")
-        self.ax_angle.set_xlabel("Angle (°)")
-        self.ax_angle.set_ylabel("Magnitude (dB)")
+        # Angle vs time plot
+        self.ax_angle = self.fig.add_subplot(gs[2])
+        self.ax_angle.set_title("Angle vs Time")
+        self.ax_angle.set_xlabel("Time (s)")
+        self.ax_angle.set_ylabel("Angle (°)")
         self.ax_angle.grid(True)
 
-        # Range-Doppler map
-        self.ax_rd = self.fig.add_subplot(gs[1, :])
-        self.ax_rd.set_title("Range-Doppler Map")
-        self.ax_rd.set_xlabel("Velocity (m/s)")
-        self.ax_rd.set_ylabel("Distance (m)")
+        # Initial empty lines for the plots
+        self.dist_line, = self.ax_dist.plot([], [], 'b-', label='Distance')
+        self.vel_line, = self.ax_vel.plot([], [], 'g-', label='Velocity')
+        self.angle_line, = self.ax_angle.plot([], [], 'r-', label='Angle')
 
-        # Initial placeholder data
-        self.dist_line, = self.ax_dist.plot([], [])
-        self.vel_line, = self.ax_vel.plot([], [])
-        self.angle_line, = self.ax_angle.plot([], [])
-
-        # RD map placeholder
-        self.rd_img = None
+        # Add legends
+        self.ax_dist.legend()
+        self.ax_vel.legend()
+        self.ax_angle.legend()
 
         # Add the plots to the tkinter interface
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plots_frame)
@@ -466,7 +462,7 @@ class RadarGUI:
             self.angle_var.set(f"Angle: {results['angle']:.1f}°")
 
             # Update plots
-            self.update_plots(results)
+            self.update_time_series_plots(results)
 
             # Schedule next frame
             self.root.after(10, self.process_frame)
@@ -481,77 +477,37 @@ class RadarGUI:
             self.processing_active = False
             self.save_and_cleanup()
 
-    def update_plots(self, results):
-        """Update the plots with new data"""
-        # Get data from results
-        # Distance profile (first antenna)
-        distance_profile = results['distance_profiles'][0]
-        max_range = self.processor.config['max_range_m']
-        range_axis = np.linspace(0, max_range, len(distance_profile))
-
-        # Velocity profile (first antenna)
-        velocity_map = results['velocity_maps'][0]
-        velocity_profile = np.max(velocity_map, axis=0)
-        max_speed = self.processor.config['max_speed_m_s']
-        velocity_axis = np.linspace(-max_speed, max_speed, len(velocity_profile))
-
-        # Angle profile
-        angle_profile = np.max(results['angle_profile'], axis=0)
-        max_angle = self.processor.config['max_angle_degrees']
-        angle_axis = np.linspace(-max_angle, max_angle, len(angle_profile))
+    def update_time_series_plots(self, results):
+        """Update the time series plots with new data"""
+        # Get data for plotting
+        timestamps = self.processor.timestamps
+        distances = self.processor.distances
+        velocities = self.processor.velocities
+        angles = self.processor.angles
 
         # Update distance plot
-        self.dist_line.set_data(range_axis, 20 * np.log10(distance_profile + 1e-10))
-        self.ax_dist.set_xlim(0, max_range)
-        self.ax_dist.set_ylim(np.min(20 * np.log10(distance_profile + 1e-10)) - 5,
-                              np.max(20 * np.log10(distance_profile + 1e-10)) + 5)
-
-        # Mark detected distance
-        for line in self.ax_dist.get_lines()[1:]:
-            line.remove()
-        self.ax_dist.axvline(x=results['distance'], color='r', linestyle='--', alpha=0.7)
+        self.dist_line.set_data(timestamps, distances)
+        self.ax_dist.set_xlim(0, max(timestamps) if timestamps else 1)
+        if distances:
+            min_dist = min(distances) * 0.9
+            max_dist = max(distances) * 1.1
+            self.ax_dist.set_ylim(min_dist, max_dist)
 
         # Update velocity plot
-        self.vel_line.set_data(velocity_axis, velocity_profile)
-        self.ax_vel.set_xlim(-max_speed, max_speed)
-        self.ax_vel.set_ylim(np.min(velocity_profile) - 5, np.max(velocity_profile) + 5)
-
-        # Mark detected velocity
-        for line in self.ax_vel.get_lines()[1:]:
-            line.remove()
-        self.ax_vel.axvline(x=results['velocity'], color='r', linestyle='--', alpha=0.7)
+        self.vel_line.set_data(timestamps, velocities)
+        self.ax_vel.set_xlim(0, max(timestamps) if timestamps else 1)
+        if velocities:
+            min_vel = min(velocities) - 0.5
+            max_vel = max(velocities) + 0.5
+            self.ax_vel.set_ylim(min_vel, max_vel)
 
         # Update angle plot
-        self.angle_line.set_data(angle_axis, angle_profile)
-        self.ax_angle.set_xlim(-max_angle, max_angle)
-        self.ax_angle.set_ylim(np.min(angle_profile) - 5, np.max(angle_profile) + 5)
-
-        # Mark detected angle
-        for line in self.ax_angle.get_lines()[1:]:
-            line.remove()
-        self.ax_angle.axvline(x=results['angle'], color='r', linestyle='--', alpha=0.7)
-
-        # Update range-Doppler map
-        if self.rd_img is None:
-            extent = [-max_speed, max_speed, 0, max_range]
-            self.rd_img = self.ax_rd.imshow(
-                velocity_map,
-                aspect='auto',
-                origin='lower',
-                cmap='viridis',
-                extent=extent,
-                interpolation='nearest'
-            )
-            self.fig.colorbar(self.rd_img, ax=self.ax_rd, label="Magnitude (dB)")
-        else:
-            self.rd_img.set_data(velocity_map)
-            self.rd_img.set_clim(vmin=np.min(velocity_map), vmax=np.max(velocity_map))
-
-        # Mark detected distance and velocity on RD map
-        for line in self.ax_rd.get_lines():
-            line.remove()
-        self.ax_rd.axhline(y=results['distance'], color='r', linestyle='--', alpha=0.7)
-        self.ax_rd.axvline(x=results['velocity'], color='r', linestyle='--', alpha=0.7)
+        self.angle_line.set_data(timestamps, angles)
+        self.ax_angle.set_xlim(0, max(timestamps) if timestamps else 1)
+        if angles:
+            min_angle = min(angles) - 5
+            max_angle = max(angles) + 5
+            self.ax_angle.set_ylim(min_angle, max_angle)
 
         # Draw updated figure
         self.canvas.draw_idle()
