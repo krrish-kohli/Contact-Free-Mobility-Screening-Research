@@ -28,44 +28,30 @@
 
 import numpy as np
 
+def fft_spectrum(mat: np.ndarray, range_window: np.ndarray) -> np.ndarray:
+    """
+    Range FFT for FMCW:
+    - DC removal per chirp
+    - window across fast-time
+    - zero-pad to 2N
+    - FFT, keep positive frequencies
+    Returns shape: [num_chirps x num_samples]
+    """
+    num_chirps, num_samples = np.shape(mat)
 
-def fft_spectrum(mat, range_window):
-    # Calculate fft spectrum
-    # mat:          chirp data
-    # range_window: window applied on input data before fft
-
-    # received data 'mat' is in matrix form for a single receive antenna
-    # each row contains 'num_samples' for a single chirp
-    # total number of rows = 'num_chirps'
-
-    # -------------------------------------------------
-    # Step 1 - remove DC bias from samples
-    # -------------------------------------------------
-    [num_chirps, num_samples] = np.shape(mat)
-
-    # helpful in zero padding for high resolution FFT.
-    # compute row (chirp) averages
-    avgs = np.average(mat, 1).reshape(num_chirps, 1)
-
-    # de-bias values
+    # DC removal per chirp (fast-time)
+    avgs = np.average(mat, axis=1).reshape(num_chirps, 1)
     mat = mat - avgs
-    # -------------------------------------------------
-    # Step 2 - Windowing the Data
-    # -------------------------------------------------
+
+    # Apply window
     mat = np.multiply(mat, range_window)
 
-    # -------------------------------------------------
-    # Step 3 - add zero padding here
-    # -------------------------------------------------
-    zp1 = np.pad(mat, ((0, 0), (0, num_samples)), 'constant')
+    # Zero-pad to 2N and FFT
+    N = num_samples
+    Nfft = 2 * N
+    zp = np.pad(mat, ((0, 0), (0, N)), mode="constant")
+    rfft = np.fft.fft(zp, n=Nfft, axis=1) / Nfft
 
-    # -------------------------------------------------
-    # Step 4 - Compute FFT for distance information
-    # -------------------------------------------------
-    range_fft = np.fft.fft(zp1) / num_samples
-
-    # ignore the redundant info in negative spectrum
-    # compensate energy by doubling magnitude
-    range_fft = 2 * range_fft[:, range(int(num_samples))]
-
-    return range_fft
+    # Keep positive frequencies; scale by 2 to fold negative side (amplitude convention)
+    rfft = 2.0 * rfft[:, :N]
+    return rfft

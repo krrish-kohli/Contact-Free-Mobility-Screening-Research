@@ -15,7 +15,6 @@ from ifxradarsdk.fmcw import DeviceFmcw
 from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwMetrics, FmcwSequenceChirp
 from ifxradarsdk.common.exceptions import ErrorFrameAcquisitionFailed
 
-
 class RadarProcessor:
     """Class to handle radar sensor configuration and data processing"""
 
@@ -93,13 +92,13 @@ class RadarProcessor:
 
         # Set remaining chirp parameters which are not derived from metrics
         chirp = chirp_loop.loop.sub_sequence.contents.chirp
-        chirp.sample_rate_Hz = 1_000_000  # 1 MHz
+        # chirp.sample_rate_Hz = 1_000_000  # 1 MHz
         chirp.rx_mask = (1 << self.num_rx_antennas) - 1  # Use all available RX antennas
         chirp.tx_mask = 1  # Use first TX antenna
         chirp.tx_power_level = 31  # Maximum power
         chirp.if_gain_dB = 33
         chirp.lp_cutoff_Hz = 500000  # Low-pass filter cutoff at 500 kHz
-        chirp.hp_cutoff_Hz = 80000  # High-pass filter cutoff at 80 kHz
+        chirp.hp_cutoff_Hz = 1000  # High-pass filter cutoff at 80 kHz
 
         # Update configuration with actual values
         self.config['num_chirps'] = chirp_loop.loop.num_repetitions
@@ -123,6 +122,15 @@ class RadarProcessor:
         self.range_algo = DistanceAlgo(self.chirp, self.config['num_chirps'])
         self.doppler_algo = DopplerAlgo(self.config['num_samples'], self.config['num_chirps'], self.num_rx_antennas)
         self.dbf = DigitalBeamForming(self.num_rx_antennas, self.config['num_beams'], self.config['max_angle_degrees'])
+        
+        # Configure Doppler scaling from PRI (not ADC time), wavelength, and Ndop
+        pri = 1.0 / (self.config['frame_rate'] * self.config['num_chirps'])   # start-to-start
+        wavelength = constants.c / self.metrics.center_frequency_Hz           # λ = c/fc
+        ndop = 2 * self.config['num_chirps']                                  # because we 2x zero-pad Doppler
+        self.doppler_algo.set_doppler_scaling(pri, wavelength, ndop)
+
+        # (Already present) allocate RD buffer with Ndop = 2*num_chirps
+        # self.rd_spectrum = np.zeros((num_samples, 2*num_chirps, num_rx), dtype=complex)
 
         # Initialize arrays for range-doppler spectrum
         self.rd_spectrum = np.zeros((self.config['num_samples'], 2 * self.config['num_chirps'], self.num_rx_antennas),
@@ -144,13 +152,13 @@ class RadarProcessor:
         velocity_data_all_antennas = []
         velocity_peaks = []
 
-        # Calculate chirp duration and wavelength for Doppler resolution
-        chirp_duration = 1.0 / (self.chirp.sample_rate_Hz / self.chirp.num_samples)
+        # Ensure Doppler scaling is configured (safe if called multiple times)
+        pri = 1.0 / (self.config['frame_rate'] * self.config['num_chirps'])
         wavelength = constants.c / self.metrics.center_frequency_Hz
+        ndop = 2 * self.config['num_chirps']
+        if getattr(self.doppler_algo, "_v_per_bin", None) is None:
+            self.doppler_algo.set_doppler_scaling(pri, wavelength, ndop)
 
-        # Set the Doppler resolution if not already set
-        if self.doppler_algo.doppler_resolution is None:
-            self.doppler_algo.set_doppler_resolution(chirp_duration, wavelength)
 
         # Process range and doppler for each antenna
         for i_ant in range(self.num_rx_antennas):
@@ -162,15 +170,21 @@ class RadarProcessor:
             distance_data_all_antennas.append(distance_data)
             distance_peaks.append(distance_peak_m)
 
-            # Process velocity using the enhanced method
-            velocity_m_s, rd_map = self.doppler_algo.compute_velocity(antenna_samples, i_ant)
+            # Convert the detected distance (m) to a range-bin index
+            range_bin = int(round(distance_peak_m / self.range_algo.range_bin_length))
+
+            # Gate Doppler around that range so clutter doesn’t smear the result
+            velocity_m_s, rd_map = self.doppler_algo.compute_velocity(
+                antenna_samples, i_ant, range_bin=range_bin
+            )
+
             velocity_peaks.append(velocity_m_s)
 
             # Store range-doppler spectrum for beamforming
             self.rd_spectrum[:, :, i_ant] = rd_map
 
             # Convert to dB scale for visualization
-            rd_map_db = 20 * np.log10(abs(rd_map))
+            rd_map_db = 20 * np.log10(abs(rd_map) + 1e-12)
             velocity_data_all_antennas.append(rd_map_db)
 
         # Use digital beamforming for angle estimation

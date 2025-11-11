@@ -27,45 +27,44 @@
 # ===========================================================================
 
 import numpy as np
-from scipy import signal, constants
-
-from ifxradarsdk.fmcw.types import FmcwSequenceChirp
-from helpers.fft_spectrum import *
-
+from scipy import signal, constants as C
+from .fft_spectrum import fft_spectrum
 
 class DistanceAlgo:
-    """Algorithm for computation of distance FFT from raw data"""
-
-    def __init__(self, chirp: FmcwSequenceChirp, num_chirps_per_frame: int):
+    def __init__(self, chirp, num_chirps_per_frame: int):
         self.num_chirps_per_frame = num_chirps_per_frame
 
-        # compute Blackman-Harris Window matrix over chirp samples(range)
-        # Use try catch to cater Scipy versions issue for windowing function
+        # Range window
         try:
             self.range_window = signal.blackmanharris(chirp.num_samples).reshape(1, chirp.num_samples)
         except AttributeError:
-            self.range_window = signal.windows.blackmanharris(chirp.num_samples).reshape(1, chirp.num_samples)               
+            self.range_window = signal.windows.blackmanharris(chirp.num_samples).reshape(1, chirp.num_samples)
 
-        bandwidth_hz = abs(chirp.end_frequency_Hz - chirp.start_frequency_Hz)
-        fft_size = chirp.num_samples * 2
-        self.range_bin_length = constants.c / (2 * bandwidth_hz * fft_size / chirp.num_samples)
+        # Robust meters-per-bin using slope S and actual Nfft
+        Fs = chirp.sample_rate_Hz
+        N = chirp.num_samples
+        Nfft = 2 * N                              # we zero-pad by +N in fft_spectrum
+        T = N / Fs
+        B = abs(chirp.end_frequency_Hz - chirp.start_frequency_Hz)
+        S = B / T                                  # Hz/s (chirp slope)
+        delta_f = Fs / Nfft                        # Hz per FFT bin
+        self.range_bin_length = C.c * delta_f / (2.0 * S)  # meters per displayed bin
 
-    def compute_distance(self, chirp_data):
-        # Computes distance using chirp data
-        # chirp_data: single antenna chirp data
+        # Derive skip from HPF (minimum beat frequency admitted)
+        hp = getattr(chirp, "hp_cutoff_Hz", 0.0)
+        Rmin = (C.c * hp) / (2.0 * S) if hp > 0 else 0.0
+        self.skip_bins = int(np.ceil(Rmin / self.range_bin_length))
 
-        # Step 1 - calculate range fft spectrum of the frame
-        range_fft = fft_spectrum(chirp_data, self.range_window)
+    def compute_distance(self, chirp_data: np.ndarray):
+        """
+        chirp_data shape: [num_chirps_per_frame x num_samples]
+        Returns: (peak_distance_m, distance_spectrum_per_bin)
+        """
+        range_fft = fft_spectrum(chirp_data, self.range_window)  # [M x N]
+        # Incoherent sum across chirps
+        distance_data = np.abs(range_fft).sum(axis=0) / self.num_chirps_per_frame
 
-        # Step 2 - convert to absolute spectrum
-        range_fft_abs = abs(range_fft)
-
-        # Step 3 - coherent integration of all chirps
-        distance_data = np.divide(range_fft_abs.sum(axis=0), self.num_chirps_per_frame)
-
-        # Step 4 - peak search and distance calculation
-        skip = 8
-        distance_peak = np.argmax(distance_data[skip:])
-
-        distance_peak_m = self.range_bin_length * (distance_peak + skip)
-        return distance_peak_m, distance_data
+        # Skip bins we know the analog HPF will suppress
+        idx = int(np.argmax(distance_data[self.skip_bins:])) + self.skip_bins
+        peak_m = idx * self.range_bin_length
+        return peak_m, distance_data
