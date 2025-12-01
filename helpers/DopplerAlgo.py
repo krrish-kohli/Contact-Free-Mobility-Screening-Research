@@ -92,7 +92,7 @@ class DopplerAlgo:
         doppler = np.fft.fftshift(doppler, axes=(1,))       # center zero Doppler
         return doppler
 
-    def compute_velocity(self, data: np.ndarray, i_ant: int, range_bin: int | None = None, gate_half_width: int = 2):
+    def compute_velocity(self, data, i_ant, range_bin=None, gate_half_width=2):
         """
         Optionally gate the Doppler computation to a range bin or a small window around it.
         """
