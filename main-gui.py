@@ -312,6 +312,15 @@ class RadarGUI:
         ttk.Label(self.status_frame, textvariable=self.s2_distance_var).grid(row=1, column=4, padx=5, sticky=tk.W)
         ttk.Label(self.status_frame, textvariable=self.s3_distance_var).grid(row=1, column=5, padx=5, sticky=tk.W)
 
+        # Per-antenna *unfiltered* velocities (S1/S2/S3)
+        self.s1_velocity_var = tk.StringVar(value="S1 vel: -- m/s")
+        self.s2_velocity_var = tk.StringVar(value="S2 vel: -- m/s")
+        self.s3_velocity_var = tk.StringVar(value="S3 vel: -- m/s")
+
+        ttk.Label(self.status_frame, textvariable=self.s1_velocity_var).grid(row=2, column=3, padx=5, sticky=tk.W)
+        ttk.Label(self.status_frame, textvariable=self.s2_velocity_var).grid(row=2, column=4, padx=5, sticky=tk.W)
+        ttk.Label(self.status_frame, textvariable=self.s3_velocity_var).grid(row=2, column=5, padx=5, sticky=tk.W)
+
 
     def _build_plots(self):
         self.plots_frame = ttk.LabelFrame(self.main_frame, text="Time Series", padding=10)
@@ -410,6 +419,22 @@ class RadarGUI:
                 self.s3_distance_var.set(f"S3 dist: {self.processor.s3_distances[-1]:.2f} m")
             else:
                 self.s3_distance_var.set("S3 dist: -- m")
+
+            # Unfiltered per-sensor velocities (first 3 RX antennas)
+            if self.processor.s1_velocities:
+                self.s1_velocity_var.set(f"S1 vel: {self.processor.s1_velocities[-1]:.2f} m/s")
+            else:
+                self.s1_velocity_var.set("S1 vel: -- m/s")
+
+            if self.processor.s2_velocities:
+                self.s2_velocity_var.set(f"S2 vel: {self.processor.s2_velocities[-1]:.2f} m/s")
+            else:
+                self.s2_velocity_var.set("S2 vel: -- m/s")
+
+            if self.processor.s3_velocities:
+                self.s3_velocity_var.set(f"S3 vel: {self.processor.s3_velocities[-1]:.2f} m/s")
+            else:
+                self.s3_velocity_var.set("S3 vel: -- m/s")
 
             for ax, arr in [(self.ax_dist, self.processor.distances),
                             (self.ax_vel, self.processor.velocities),
