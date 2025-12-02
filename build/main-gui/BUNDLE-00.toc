@@ -1,0 +1,3 @@
+([('main-gui',
+   '/Users/krrishkohli/Desktop/Research/radar_sdk/radar_sdk/examples/py/FMCW/dist/main-gui',
+   'EXECUTABLE')],)

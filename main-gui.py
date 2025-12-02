@@ -70,6 +70,19 @@ class RadarProcessor:
 
     # ---- Device setup -----------------------------------------------------
 
+    def reset(self):
+        """Clear time-series buffers for a new trial."""
+        self.frame_index = 0
+        self.start_time = time.time()
+        self.timestamps = []
+        self.distances = []
+        self.velocities = []
+        self.angles = []
+
+        self.s1_distances, self.s1_velocities, self.s1_powers = [], [], []
+        self.s2_distances, self.s2_velocities, self.s2_powers = [], [], []
+        self.s3_distances, self.s3_velocities, self.s3_powers = [], [], []
+
     def _configure_device(self):
         m = FmcwMetrics(
             range_resolution_m=self.config['range_resolution_m'],
@@ -231,10 +244,10 @@ class RadarProcessor:
         return file_path
 
     def close(self):
-        try:
-            del self.device
-        except Exception:
-            pass
+        # try:
+        #     del self.device
+        # except Exception:
+        pass
 
 
 class RadarGUI:
@@ -289,6 +302,16 @@ class RadarGUI:
         ttk.Label(self.status_frame, textvariable=self.distance_var).grid(row=0, column=3, padx=5, sticky=tk.W)
         ttk.Label(self.status_frame, textvariable=self.velocity_var).grid(row=0, column=4, padx=5, sticky=tk.W)
         ttk.Label(self.status_frame, textvariable=self.angle_var).grid(row=0, column=5, padx=5, sticky=tk.W)
+        
+        # Per-antenna *unfiltered* distances (S1/S2/S3)
+        self.s1_distance_var = tk.StringVar(value="S1 dist: -- m")
+        self.s2_distance_var = tk.StringVar(value="S2 dist: -- m")
+        self.s3_distance_var = tk.StringVar(value="S3 dist: -- m")
+
+        ttk.Label(self.status_frame, textvariable=self.s1_distance_var).grid(row=1, column=3, padx=5, sticky=tk.W)
+        ttk.Label(self.status_frame, textvariable=self.s2_distance_var).grid(row=1, column=4, padx=5, sticky=tk.W)
+        ttk.Label(self.status_frame, textvariable=self.s3_distance_var).grid(row=1, column=5, padx=5, sticky=tk.W)
+
 
     def _build_plots(self):
         self.plots_frame = ttk.LabelFrame(self.main_frame, text="Time Series", padding=10)
@@ -327,14 +350,23 @@ class RadarGUI:
             dur = 0.0
         self.end_time = (time.time() + dur) if dur > 0 else None
 
+        # reset processor buffers for a fresh trial
+        self.processor.reset()
+
+        # clear plot lines so previous trial disappears
+        self.dist_line.set_data([], [])
+        self.vel_line.set_data([], [])
+        self.ang_line.set_data([], [])
+        self.canvas.draw_idle()
+
         self.processing_active = True
         self.status_var.set("Capturing…")
         self.start_button.configure(state=tk.DISABLED)
         self.stop_button.configure(state=tk.NORMAL)
 
-        self.processor.start_time = time.time()
         self._tick()
 
+    
     def stop_capture(self):
         if self.processing_active:
             self.processing_active = False
@@ -362,6 +394,23 @@ class RadarGUI:
             self.dist_line.set_data(ts, self.processor.distances)
             self.vel_line.set_data(ts, self.processor.velocities)
             self.ang_line.set_data(ts, self.processor.angles)
+            
+            # Unfiltered per-sensor distances (first 3 RX antennas)
+            if self.processor.s1_distances:
+                self.s1_distance_var.set(f"S1 dist: {self.processor.s1_distances[-1]:.2f} m")
+            else:
+                self.s1_distance_var.set("S1 dist: -- m")
+
+            if self.processor.s2_distances:
+                self.s2_distance_var.set(f"S2 dist: {self.processor.s2_distances[-1]:.2f} m")
+            else:
+                self.s2_distance_var.set("S2 dist: -- m")
+
+            if self.processor.s3_distances:
+                self.s3_distance_var.set(f"S3 dist: {self.processor.s3_distances[-1]:.2f} m")
+            else:
+                self.s3_distance_var.set("S3 dist: -- m")
+
             for ax, arr in [(self.ax_dist, self.processor.distances),
                             (self.ax_vel, self.processor.velocities),
                             (self.ax_ang, self.processor.angles)]:
